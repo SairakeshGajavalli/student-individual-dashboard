@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attendance Analytics Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.11.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.11.1/firebase-database-compat.js"></script>
+    
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(to right, #e2e2e2, #006747);
+            margin: 0;
+            padding: 20px;
+        }
+
+        .dashboard-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            padding: 20px;
+        }
+
+        .stats-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #006747;
+        }
+
+        .chart-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+        }
+
+        .filters {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        @media (max-width: 768px) {
+            .chart-container {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <div class="card">
+            <h1 class="text-center mb-4">Attendance Analytics Dashboard</h1>
+            
+            <div class="filters">
+                <div class="form-group">
+                    <label for="dateFilter">Date:</label>
+                    <input type="date" id="dateFilter" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label for="courseFilter">Course:</label>
+                    <select id="courseFilter" class="form-control">
+                        <option value="All Courses">All Courses</option>
+                        <option value="Android">Android</option>
+                        <option value="Patterns">Patterns</option>
+                        <option value="GDP-1">GDP-1</option>
+                        <option value="Java">Java</option>
+                        <option value="iOS">iOS</option>
+                        <option value="Web Applications">Web Applications</option>
+                        <option value="ADB">ADB</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="stats-container">
+                <div class="stat-card">
+                    <h3>Total Attendance</h3>
+                    <div id="totalAttendance" class="stat-value">0</div>
+                    <div class="text-muted">Students Present</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Active Courses</h3>
+                    <div id="activeCourses" class="stat-value">0</div>
+                    <div class="text-muted">Courses with Attendance</div>
+                </div>
+            </div>
+
+            <div class="chart-container">
+                <div class="card">
+                    <h3>Attendance by Course</h3>
+                    <canvas id="courseChart"></canvas>
+                </div>
+                <div class="card">
+                    <h3>Attendance by Time</h3>
+                    <canvas id="timeChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Firebase
+        const firebaseConfig = {
+            apiKey: "AIzaSyBPE6TbZykGf7Kui6fsR6-3W9w6uuzg0ms",
+            authDomain: "login-12d02.firebaseapp.com",
+            databaseURL: "https://login-12d02-default-rtdb.firebaseio.com",
+            projectId: "login-12d02",
+            storageBucket: "login-12d02.appspot.com",
+            messagingSenderId: "894912184495",
+            appId: "1:894912184495:web:2a6fadb14356c49b24545a",
+            measurementId: "G-G9XVZSVL5Y"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+
+        // Chart instances
+        let courseChart = null;
+        let timeChart = null;
+
+        // Initialize date filter with today's date
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('dateFilter').value = today;
+
+        // Event listeners for filters
+        document.getElementById('dateFilter').addEventListener('change', updateDashboard);
+        document.getElementById('courseFilter').addEventListener('change', updateDashboard);
+
+        function formatDate(dateString) {
+            return new Date(dateString).toISOString().split('T')[0];
+        }
+
+        function updateDashboard() {
+            const selectedDate = document.getElementById('dateFilter').value;
+            const selectedCourse = document.getElementById('courseFilter').value;
+
+            database.ref('student-details').once('value')
+                .then(snapshot => {
+                    const data = snapshot.val() || {};
+                    const records = Object.values(data);
+
+                    // Filter records
+                    const filteredRecords = records.filter(record => {
+                        const recordDate = formatDate(record.timestamp);
+                        const courseMatch = selectedCourse === 'All Courses' || record.course === selectedCourse;
+                        return recordDate === selectedDate && courseMatch;
+                    });
+
+                    updateStats(filteredRecords);
+                    updateCharts(filteredRecords);
+                });
+        }
+
+        function updateStats(records) {
+            document.getElementById('totalAttendance').textContent = records.length;
+            const uniqueCourses = new Set(records.map(record => record.course)).size;
+            document.getElementById('activeCourses').textContent = uniqueCourses;
+        }
+
+        function updateCharts(records) {
+            // Course distribution chart
+            const courses = ['Android', 'Patterns', 'GDP-1', 'Java', 'iOS', 'Web Applications', 'ADB'];
+            const courseData = courses.map(course => 
+                records.filter(record => record.course === course).length
+            );
+
+            if (courseChart) {
+                courseChart.destroy();
+            }
+
+            courseChart = new Chart(document.getElementById('courseChart'), {
+                type: 'pie',
+                data: {
+                    labels: courses,
+                    datasets: [{
+                        data: courseData,
+                        backgroundColor: [
+                            '#FF6384',
+                            '#36A2EB',
+                            '#FFCE56',
+                            '#4BC0C0',
+                            '#9966FF',
+                            '#FF9F40',
+                            '#47B39C'
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'right'
+                        }
+                    }
+                }
+            });
+
+            // Time distribution chart
+            const times = [...new Set(records.map(record => record.timings))].sort();
+            const timeData = times.map(time => 
+                records.filter(record => record.timings === time).length
+            );
+
+            if (timeChart) {
+                timeChart.destroy();
+            }
+
+            timeChart = new Chart(document.getElementById('timeChart'), {
+                type: 'bar',
+                data: {
+                    labels: times,
+                    datasets: [{
+                        label: 'Students',
+                        data: timeData,
+                        backgroundColor: '#4BC0C0'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 1
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Initial dashboard update
+        updateDashboard();
+    </script>
+</body>
+</html>
